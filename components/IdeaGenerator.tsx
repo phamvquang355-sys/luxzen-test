@@ -18,7 +18,6 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
 
   // 2. Click vào ảnh để thêm điểm neo (Pin)
   const handleImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
-    // FIX: Removed 'activePin' check to allow adding unlimited points consecutively
     if (!imgRef.current || resultImage) return;
 
     const rect = imgRef.current.getBoundingClientRect();
@@ -42,8 +41,6 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
     onStateChange({
       assets: assets.map(a => a.id === id ? { ...a, image: file } : a)
     });
-    // Optional: Keep active pin open or close it
-    // setActivePin(null); 
   };
 
   const removeAsset = (id: string) => {
@@ -120,7 +117,7 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
                         </div>
                         
                         {/* Hiển thị các điểm neo đã chấm */}
-                        {assets.map((asset) => (
+                        {assets.map((asset, idx) => (
                         <div 
                             key={asset.id}
                             className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform hover:scale-110 z-20`}
@@ -134,7 +131,7 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
                                 {asset.image ? (
                                     <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                                 ) : (
-                                    <span className="text-white text-xs font-bold">{assets.indexOf(asset) + 1}</span>
+                                    <span className="text-white text-xs font-bold">{idx + 1}</span>
                                 )}
                             </div>
                             <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-black/70 text-white text-[10px] px-2 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none">
@@ -196,7 +193,7 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
           <div className="bg-white p-4 rounded-2xl shadow-sm border border-zinc-200 sticky top-6 h-full max-h-[calc(100vh-100px)] flex flex-col">
             <h3 className="text-md font-bold text-zinc-800 mb-4 border-b pb-2">Danh sách vật thể ({assets.length})</h3>
             
-            <div className="space-y-3 overflow-y-auto pr-2 flex-grow">
+            <div className="space-y-3 overflow-y-auto pr-2 flex-grow custom-scrollbar">
               {assets.length === 0 && (
                 <div className="text-sm text-zinc-400 italic text-center py-12 border-2 border-dashed border-zinc-100 rounded-xl">
                     <p>Chưa có vật thể nào.</p>
@@ -212,7 +209,7 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
                 >
                   <div className="flex justify-between items-center mb-2">
                     <div className="flex items-center gap-2 w-full">
-                        <span className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] text-white font-bold ${asset.image ? 'bg-green-500' : 'bg-zinc-400'}`}>
+                        <span className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs text-white font-bold ${asset.image ? 'bg-green-500' : 'bg-zinc-400'}`}>
                             {idx + 1}
                         </span>
                         <input 
@@ -225,34 +222,42 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
                             });
                         }}
                         onClick={(e) => e.stopPropagation()}
+                        placeholder="Đặt tên vật thể..."
                         />
                     </div>
                     <button 
                         onClick={(e) => { e.stopPropagation(); removeAsset(asset.id); }} 
                         className="text-zinc-400 hover:text-red-500 transition-colors p-1"
+                        title="Xóa vật thể"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/></svg>
                     </button>
                   </div>
 
-                  {activePin === asset.id && (
+                  {activePin === asset.id ? (
                       <div className="mt-2 animate-in fade-in slide-in-from-top-2">
                         <ImageUpload 
-                        onFileSelect={(file) => updateAssetImage(asset.id, file)} 
-                        compact 
-                        placeholder="Tải ảnh vật thể mẫu"
-                        previewUrl={asset.image?.objectURL || null}
+                            onFileSelect={(file) => updateAssetImage(asset.id, file)} 
+                            compact 
+                            placeholder="Tải ảnh vật thể mẫu (PNG/JPG)"
+                            previewUrl={asset.image?.objectURL || null}
                         />
-                        <div className="text-[10px] text-zinc-400 mt-1 text-center">
-                             Tọa độ: {Math.round(asset.x)}%, {Math.round(asset.y)}%
+                        <div className="text-[10px] text-zinc-400 mt-2 text-center bg-white/50 py-1 rounded">
+                             Vị trí: {Math.round(asset.x)}%, {Math.round(asset.y)}%
                         </div>
                     </div>
-                  )}
-                  
-                  {/* Thumbnail Preview when collapsed */}
-                  {activePin !== asset.id && asset.image && (
-                      <div className="h-8 w-8 rounded overflow-hidden mt-1 ml-7">
-                          <img src={asset.image.objectURL} className="w-full h-full object-cover" alt="thumb" />
+                  ) : (
+                      <div className="flex gap-2 mt-1 ml-8">
+                        {asset.image ? (
+                             <img src={asset.image.objectURL} className="w-10 h-10 object-cover rounded-md border border-zinc-200" alt="thumb" />
+                        ) : (
+                            <div className="w-10 h-10 bg-zinc-200 rounded-md flex items-center justify-center text-[10px] text-zinc-400 border border-dashed border-zinc-300">
+                                Trống
+                            </div>
+                        )}
+                        <p className="text-xs text-zinc-500 line-clamp-2 flex-1 pt-1">
+                            {asset.image ? "Đã có ảnh tham chiếu." : "Chưa có ảnh, AI sẽ tự tạo dựa trên tên."}
+                        </p>
                       </div>
                   )}
                 </div>
@@ -262,7 +267,7 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
             <div className="mt-4 pt-4 border-t border-zinc-100 bg-white">
                 <button 
                 onClick={handleGenerate}
-                disabled={isLoading || assets.length === 0}
+                disabled={isLoading || !sourceSketch}
                 className="w-full py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold rounded-xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 disabled:grayscale disabled:scale-100"
                 >
                 {isLoading ? <Spinner /> : "BẮT ĐẦU DIỄN HỌA (40 Credits)"}

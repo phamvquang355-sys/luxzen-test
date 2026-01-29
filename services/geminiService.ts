@@ -9,6 +9,37 @@ const WEDDING_MATERIALS_KEYWORDS = {
   lighting: "cinematic volumetric lighting, warm amber ambient glow, professional stage spotlights, Tyndall effect"
 };
 
+// --- RETRY HELPER FOR 503 ERRORS ---
+const callWithRetry = async <T>(fn: () => Promise<T>, retries = 5, delay = 3000): Promise<T> => {
+    let lastError;
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await fn();
+        } catch (e: any) {
+            lastError = e;
+            const msg = e?.message || JSON.stringify(e);
+            
+            // Check for common overload signals, including nested error objects
+            const isLoadError = 
+                msg.includes('overloaded') || 
+                msg.includes('503') || 
+                e?.status === 503 || 
+                e?.code === 503 || 
+                e?.error?.code === 503 || 
+                e?.error?.status === 'UNAVAILABLE';
+            
+            if (isLoadError && i < retries - 1) {
+                console.warn(`Gemini Model overloaded (Attempt ${i + 1}/${retries}). Retrying in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2; // Exponential backoff (3s -> 6s -> 12s -> 24s -> 48s)
+                continue;
+            }
+            throw e;
+        }
+    }
+    throw lastError;
+};
+
 // --- LEARNING SYSTEM FUNCTIONS (RLHF) ---
 
 /**
@@ -188,7 +219,7 @@ export const generatePromptFromImageAndText = async (
   }
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
-    const response = await ai.models.generateContent({
+    const response = await callWithRetry(() => ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: {
         parts: [
@@ -197,7 +228,7 @@ export const generatePromptFromImageAndText = async (
         ]
       },
       config: { temperature: 0.4 }
-    });
+    }));
     return response.text || "Không thể phân tích ảnh.";
   } catch (error) {
     console.error("Auto-Prompt Generation Error:", error);
@@ -314,7 +345,7 @@ export const generateWeddingRender = async (
       `;
 
       try {
-          const reasoningResponse = await ai.models.generateContent({
+          const reasoningResponse = await callWithRetry(() => ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: {
                 parts: [
@@ -323,7 +354,7 @@ export const generateWeddingRender = async (
                 ]
             },
             config: { temperature: 0.2 }
-          });
+          }));
           
           const sceneDescription = reasoningResponse.text || baseDescription;
           masterPrompt = generateRenderPrompt(
@@ -347,7 +378,7 @@ export const generateWeddingRender = async (
   // STEP 2: RENDERING
   console.log("Step 2: Rendering with Gemini Pro Image...");
   try {
-    const renderResponse = await ai.models.generateContent({
+    const renderResponse = await callWithRetry(() => ai.models.generateContent({
       model: 'gemini-3-pro-image-preview',
       contents: {
         parts: [
@@ -358,7 +389,7 @@ export const generateWeddingRender = async (
       config: {
         systemInstruction: "You are a specialized 3D Wedding Visualizer. Transform the input sketch into a photorealistic render following the prompt exactly."
       }
-    });
+    }));
 
     if (renderResponse.candidates && renderResponse.candidates.length > 0) {
         const content = renderResponse.candidates[0].content;
@@ -405,7 +436,7 @@ export const generateHighQualityImage = async (
     : "16:9";
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await callWithRetry(() => ai.models.generateContent({
       model: 'gemini-3-pro-image-preview', 
       contents: { parts: contentsParts },
       config: {
@@ -415,7 +446,7 @@ export const generateHighQualityImage = async (
         },
         systemInstruction: "You are an expert image upscaler."
       },
-    });
+    }));
 
     const generatedImageUrls: string[] = [];
     if (response.candidates && response.candidates.length > 0) {
@@ -476,11 +507,11 @@ export const generateAdvancedEdit = async (
   parts.push({ text: userPrompt });
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await callWithRetry(() => ai.models.generateContent({
       model: 'gemini-3-pro-image-preview', 
       contents: { parts: parts }, 
       config: { systemInstruction }
-    });
+    }));
     if (response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data) {
        return `data:${response.candidates[0].content.parts[0].inlineData.mimeType};base64,${response.candidates[0].content.parts[0].inlineData.data}`;
     }
@@ -495,11 +526,11 @@ export const detectSimilarObjects = async (base64: string, mime: string, prompt:
     if (!process.env.API_KEY) throw new Error("API Key missing");
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     try {
-        const response = await ai.models.generateContent({
+        const response = await callWithRetry(() => ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: { parts: [{ inlineData: { mimeType: mime, data: base64 } }, { text: prompt }] },
             config: { responseMimeType: "application/json", responseSchema: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { x: { type: Type.NUMBER }, y: { type: Type.NUMBER } } } } }
-        });
+        }));
         const jsonStr = response.text?.trim();
         return jsonStr ? JSON.parse(jsonStr) : [];
     } catch (e) {
@@ -511,10 +542,10 @@ export const generateSketch = async (base64: string, mime: string, style: Sketch
      if (!process.env.API_KEY) throw new Error("API Key missing");
      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
      try {
-         const response = await ai.models.generateContent({
+         const response = await callWithRetry(() => ai.models.generateContent({
              model: 'gemini-2.5-flash-image',
              contents: { parts: [{ inlineData: { mimeType: mime, data: base64 } }, { text: `High quality ${style} sketch.` }] }
-         });
+         }));
          if (response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data) {
             return `data:${response.candidates[0].content.parts[0].inlineData.mimeType};base64,${response.candidates[0].content.parts[0].inlineData.data}`;
          }
@@ -524,41 +555,85 @@ export const generateSketch = async (base64: string, mime: string, style: Sketch
      }
 };
 
-// Idea Render Helper
-const analyzeAssetDNA = async (ai: GoogleGenAI, asset: IdeaAsset): Promise<string> => {
-  if (!asset.image) return `${asset.label} at (${asset.x.toFixed(1)}%, ${asset.y.toFixed(1)}%)`;
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: { parts: [{ text: "Describe this object briefly." }, { inlineData: { mimeType: asset.image.mimeType, data: asset.image.base64 } }] }
-    });
-    return `${asset.label} (${response.text?.trim()}) at (${asset.x.toFixed(1)}%, ${asset.y.toFixed(1)}%)`;
-  } catch { return asset.label; }
+// --- IDEA GENERATOR WITH MULTIMODAL COMPOSITING ---
+
+// Helper: Convert coordinates to semantic descriptions
+const getLocationDescription = (x: number, y: number): string => {
+    let vertical = "";
+    if (y < 35) vertical = "Top/Background";
+    else if (y > 65) vertical = "Bottom/Foreground";
+    else vertical = "Middle ground";
+
+    let horizontal = "";
+    if (x < 35) horizontal = "Left side";
+    else if (x > 65) horizontal = "Right side";
+    else horizontal = "Center";
+
+    return `${vertical} - ${horizontal} (approx ${x}%, ${y}%)`;
 };
 
 export const generateIdeaRender = async (sketch: FileData, assets: IdeaAsset[], onStatus?: (s:string)=>void): Promise<string> => {
      if (!process.env.API_KEY) throw new Error("API Key missing");
      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-     if (onStatus) onStatus("Analyzing assets...");
-     const validAssets = assets.filter(a => a.image !== null);
-     const descriptions = await Promise.all(validAssets.map(a => analyzeAssetDNA(ai, a)));
-     const allDesc = [...descriptions, ...assets.filter(a=>!a.image).map(a=>`${a.label} at ${a.x},${a.y}`)].join('\n');
      
-     if (onStatus) onStatus("Planning scene...");
-     const planPrompt = `Map these objects onto the sketch: \n${allDesc}. Return Master Prompt.`;
-     const planRes = await ai.models.generateContent({
-         model: 'gemini-3-flash-preview',
-         contents: { parts: [{ text: planPrompt }, { inlineData: { mimeType: sketch.mimeType, data: sketch.base64 } }] }
-     });
-     const masterPrompt = planRes.text || "";
+     if (onStatus) onStatus("Đang phân tích và chuẩn bị dữ liệu hình ảnh...");
 
-     if (onStatus) onStatus("Rendering final 3D...");
-     const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: { parts: [{ text: `TASK: Render this.\n${masterPrompt}` }, { inlineData: { mimeType: sketch.mimeType, data: sketch.base64 } }] }
+     // 1. Prepare parts for the multimodal request
+     // Part 0: The base sketch
+     const requestParts: any[] = [
+        { inlineData: { mimeType: sketch.mimeType, data: sketch.base64 } }
+     ];
+
+     // 2. Build the descriptive prompt mapping assets
+     let assetInstructions = "TASK: COMPOSITE RENDERING.\nBASE IMAGE: The first image provided is the 'Base Sketch'.\n\nOBJECT PLACEMENT INSTRUCTIONS:\n";
+     
+     assets.forEach((asset, index) => {
+         // Add asset image to request parts if available
+         if (asset.image) {
+             requestParts.push({ inlineData: { mimeType: asset.image.mimeType, data: asset.image.base64 } });
+             // The asset image index in the parts array is index + 1 (since sketch is 0)
+             assetInstructions += `\n[OBJECT ${index + 1}]: Use the image provided in Part #${index + 2} as a visual reference.\n`;
+         } else {
+             assetInstructions += `\n[OBJECT ${index + 1}]: No visual reference provided, generate based on label: "${asset.label}".\n`;
+         }
+
+         const location = getLocationDescription(asset.x, asset.y);
+         assetInstructions += `   - IDENTITY: ${asset.label}\n`;
+         assetInstructions += `   - LOCATION: Place this object at the ${location} of the scene.\n`;
+         assetInstructions += `   - INTEGRATION: Blend it realistically into the environment with correct lighting and perspective matching the Base Sketch.\n`;
      });
-     if (response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data) {
-        return `data:${response.candidates[0].content.parts[0].inlineData.mimeType};base64,${response.candidates[0].content.parts[0].inlineData.data}`;
+
+     const masterPrompt = `
+     ${assetInstructions}
+
+     FINAL RENDERING RULES:
+     1. PRESERVE STRUCTURE: Keep the architectural layout of the 'Base Sketch' exactly as is.
+     2. REALISM: Render the entire scene as a high-end luxury wedding photograph (8k, cinematic lighting).
+     3. MATERIALS: Use the visual references provided for the objects to match their texture and color exactly.
+     4. HARMONY: Ensure all placed objects cast correct shadows and reflect the environment lighting.
+     `;
+
+     requestParts.push({ text: masterPrompt });
+
+     // 3. Render
+     if (onStatus) onStatus("Đang thực hiện Render tổng hợp đa phương thức...");
+     
+     try {
+         const response = await callWithRetry(() => ai.models.generateContent({
+            // Using Pro model for best multimodal reasoning and image compositing
+            model: 'gemini-3-pro-image-preview', 
+            contents: { parts: requestParts },
+            config: {
+                systemInstruction: "You are a professional 3D Compositor and Architectural Visualizer. Your goal is to take a base sketch and realistically populate it with specific reference objects at specific locations, creating a cohesive, photorealistic final image."
+            }
+         }));
+
+         if (response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data) {
+            return `data:${response.candidates[0].content.parts[0].inlineData.mimeType};base64,${response.candidates[0].content.parts[0].inlineData.data}`;
+         }
+         throw new Error("Idea render failed: No image data.");
+     } catch (e) {
+         console.error("Render Error:", e);
+         throw e;
      }
-     throw new Error("Idea render failed");
 };
