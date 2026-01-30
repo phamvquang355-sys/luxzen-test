@@ -8,7 +8,9 @@ import * as geminiService from '../services/geminiService';
 export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChange, userCredits, onDeductCredits, onReset }) => {
   const { sourceSketch, assets, isLoading, resultImage, error } = state;
   const [activePin, setActivePin] = useState<string | null>(null);
-  const [loadingStatus, setLoadingStatus] = useState<string>("Đang xử lý..."); // Local state for status messages
+  const [loadingStatus, setLoadingStatus] = useState<string>("Đang xử lý...");
+  const [tempPinPosition, setTempPinPosition] = useState<{x: number, y: number} | null>(null);
+  const [showUploadModal, setShowUploadModal] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
 
   // 1. Xử lý tải ảnh phác thảo gốc
@@ -16,7 +18,7 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
     onStateChange({ sourceSketch: file, assets: [], resultImage: null, error: null });
   };
 
-  // 2. Click vào ảnh để thêm điểm neo (Pin)
+  // 2. Click vào ảnh để mở Modal upload ảnh Moodboard
   const handleImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
     if (!imgRef.current || resultImage) return;
 
@@ -24,19 +26,33 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
 
-    const newAsset: IdeaAsset = {
-      id: Date.now().toString(),
-      x,
-      y,
-      image: null,
-      label: `Vật thể ${assets.length + 1}`
-    };
-
-    onStateChange({ assets: [...assets, newAsset] });
-    setActivePin(newAsset.id); // Mở ngay phần tải ảnh cho điểm vừa chấm
+    setTempPinPosition({ x, y });
+    setShowUploadModal(true);
   };
 
-  // 3. Cập nhật ảnh vật thể cho một điểm neo
+  // 3. Xử lý khi người dùng chọn xong ảnh moodboard trong Modal
+  const handleMoodboardImageSelect = (file: FileData) => {
+      if (!tempPinPosition) return;
+
+      const newAsset: IdeaAsset = {
+          id: Date.now().toString(),
+          x: tempPinPosition.x,
+          y: tempPinPosition.y,
+          image: file,
+          label: `Moodboard Ref ${assets.length + 1}`
+      };
+
+      onStateChange({
+          assets: [...assets, newAsset]
+      });
+      setActivePin(newAsset.id);
+      
+      // Reset Modal state
+      setShowUploadModal(false);
+      setTempPinPosition(null);
+  };
+
+  // 4. Cập nhật ảnh vật thể cho một điểm neo (nếu muốn thay đổi sau khi tạo)
   const updateAssetImage = (id: string, file: FileData) => {
     onStateChange({
       assets: assets.map(a => a.id === id ? { ...a, image: file } : a)
@@ -76,10 +92,41 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
   };
 
   return (
-    <div className="flex flex-col gap-6 p-4 md:p-6 bg-zinc-50 min-h-screen rounded-2xl">
+    <div className="flex flex-col gap-6 p-4 md:p-6 bg-zinc-50 min-h-screen rounded-2xl relative">
+      
+      {/* Modal Upload Ảnh Moodboard */}
+      {showUploadModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="bg-white p-6 rounded-2xl w-full max-w-md shadow-2xl scale-100 animate-in zoom-in-95 duration-200">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-serif font-bold text-xl text-luxury-900">Ghim ảnh Moodboard</h3>
+                    <button onClick={() => setShowUploadModal(false)} className="text-gray-400 hover:text-gray-600">
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <p className="text-sm text-luxury-500 mb-6">Tải lên ảnh mẫu vật liệu hoặc đồ vật trang trí cho vị trí này trên phác thảo.</p>
+                
+                <ImageUpload 
+                    onFileSelect={handleMoodboardImageSelect}
+                    previewUrl={null}
+                    placeholder="Chọn ảnh tham chiếu (JPG/PNG)"
+                    maxWidth={512}
+                    quality={0.8}
+                />
+                
+                <button 
+                    onClick={() => setShowUploadModal(false)} 
+                    className="w-full mt-4 py-3 text-red-500 font-bold hover:bg-red-50 rounded-xl transition-colors"
+                >
+                    Hủy Bỏ
+                </button>
+            </div>
+        </div>
+      )}
+
       <div className="flex flex-col">
           <h2 className="text-3xl font-serif font-bold text-luxury-900">Idea Generator</h2>
-          <p className="text-luxury-500 italic">Biến ý tưởng thành hiện thực: Ghim vật thể lên phác thảo & Render</p>
+          <p className="text-luxury-500 italic">Moodboard Mode: Ghim ảnh vật liệu lên phác thảo để AI kết hợp.</p>
       </div>
 
       <div className="flex flex-col lg:flex-row gap-6 h-full">
@@ -116,33 +163,33 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
                             />
                         </div>
                         
-                        {/* Hiển thị các điểm neo đã chấm */}
+                        {/* Hiển thị các điểm ghim đã có */}
                         {assets.map((asset, idx) => (
                         <div 
                             key={asset.id}
-                            className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform hover:scale-110 z-20`}
+                            className={`absolute w-10 h-10 -ml-5 -mt-5 border-2 border-white rounded-full overflow-hidden shadow-lg hover:scale-125 transition-transform z-20 cursor-pointer ${activePin === asset.id ? 'ring-4 ring-purple-400' : ''}`}
                             style={{ left: `${asset.x}%`, top: `${asset.y}%` }}
                             onClick={(e) => {
                                 e.stopPropagation();
                                 setActivePin(asset.id);
                             }}
                         >
-                            <div className={`flex items-center justify-center w-8 h-8 rounded-full shadow-lg border-2 border-white transition-colors ${activePin === asset.id ? 'bg-purple-600 scale-125' : (asset.image ? 'bg-green-500' : 'bg-red-500 animate-pulse')}`}>
-                                {asset.image ? (
-                                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                                ) : (
-                                    <span className="text-white text-xs font-bold">{idx + 1}</span>
-                                )}
-                            </div>
-                            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-black/70 text-white text-[10px] px-2 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none">
-                                {asset.label}
+                            {asset.image ? (
+                                <img src={asset.image.objectURL} className="w-full h-full object-cover" alt="pin" />
+                            ) : (
+                                <div className="w-full h-full bg-red-500 flex items-center justify-center text-white font-bold text-xs">
+                                    ?
+                                </div>
+                            )}
+                            <div className="absolute inset-0 bg-black/30 flex items-center justify-center text-white font-bold text-xs pointer-events-none">
+                                {idx + 1}
                             </div>
                         </div>
                         ))}
 
                         {!isLoading && (
                             <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-sm text-white px-4 py-2 rounded-full text-sm font-bold shadow-lg pointer-events-none opacity-80">
-                                Click vào ảnh để thêm vật thể
+                                Click vào vị trí bất kỳ để ghim ảnh Moodboard
                             </div>
                         )}
                         
@@ -191,13 +238,13 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
         {/* CỘT PHẢI: QUẢN LÝ VẬT THỂ (ASSETS) */}
         <div className="w-full lg:w-96 space-y-4">
           <div className="bg-white p-4 rounded-2xl shadow-sm border border-zinc-200 sticky top-6 h-full max-h-[calc(100vh-100px)] flex flex-col">
-            <h3 className="text-md font-bold text-zinc-800 mb-4 border-b pb-2">Danh sách vật thể ({assets.length})</h3>
+            <h3 className="text-md font-bold text-zinc-800 mb-4 border-b pb-2">Danh sách Moodboard ({assets.length})</h3>
             
             <div className="space-y-3 overflow-y-auto pr-2 flex-grow custom-scrollbar">
               {assets.length === 0 && (
                 <div className="text-sm text-zinc-400 italic text-center py-12 border-2 border-dashed border-zinc-100 rounded-xl">
-                    <p>Chưa có vật thể nào.</p>
-                    <p className="text-xs mt-2">Click vào ảnh phác thảo bên trái để bắt đầu.</p>
+                    <p>Chưa có ghim nào.</p>
+                    <p className="text-xs mt-2">Click vào ảnh phác thảo bên trái để thêm ảnh tham chiếu.</p>
                 </div>
               )}
 
@@ -209,7 +256,7 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
                 >
                   <div className="flex justify-between items-center mb-2">
                     <div className="flex items-center gap-2 w-full">
-                        <span className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs text-white font-bold ${asset.image ? 'bg-green-500' : 'bg-zinc-400'}`}>
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs text-white font-bold bg-purple-600">
                             {idx + 1}
                         </span>
                         <input 
@@ -239,7 +286,7 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
                         <ImageUpload 
                             onFileSelect={(file) => updateAssetImage(asset.id, file)} 
                             compact 
-                            placeholder="Tải ảnh vật thể mẫu (PNG/JPG)"
+                            placeholder="Thay đổi ảnh"
                             previewUrl={asset.image?.objectURL || null}
                         />
                         <div className="text-[10px] text-zinc-400 mt-2 text-center bg-white/50 py-1 rounded">
@@ -248,15 +295,11 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
                     </div>
                   ) : (
                       <div className="flex gap-2 mt-1 ml-8">
-                        {asset.image ? (
+                        {asset.image && (
                              <img src={asset.image.objectURL} className="w-10 h-10 object-cover rounded-md border border-zinc-200" alt="thumb" />
-                        ) : (
-                            <div className="w-10 h-10 bg-zinc-200 rounded-md flex items-center justify-center text-[10px] text-zinc-400 border border-dashed border-zinc-300">
-                                Trống
-                            </div>
                         )}
                         <p className="text-xs text-zinc-500 line-clamp-2 flex-1 pt-1">
-                            {asset.image ? "Đã có ảnh tham chiếu." : "Chưa có ảnh, AI sẽ tự tạo dựa trên tên."}
+                            {asset.image ? "Đã có ảnh tham chiếu." : "Chưa có ảnh."}
                         </p>
                       </div>
                   )}
@@ -270,7 +313,7 @@ export const IdeaGenerator: React.FC<IdeaGeneratorProps> = ({ state, onStateChan
                 disabled={isLoading || !sourceSketch}
                 className="w-full py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold rounded-xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 disabled:grayscale disabled:scale-100"
                 >
-                {isLoading ? <Spinner /> : "BẮT ĐẦU DIỄN HỌA (40 Credits)"}
+                {isLoading ? <Spinner /> : "RENDER MOODBOARD (40 Credits)"}
                 </button>
             </div>
           </div>

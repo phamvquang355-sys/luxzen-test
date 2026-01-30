@@ -557,63 +557,61 @@ export const generateSketch = async (base64: string, mime: string, style: Sketch
 
 // --- IDEA GENERATOR WITH MULTIMODAL COMPOSITING ---
 
-// Helper: Convert coordinates to semantic descriptions
-const getLocationDescription = (x: number, y: number): string => {
-    let vertical = "";
-    if (y < 35) vertical = "Top/Background";
-    else if (y > 65) vertical = "Bottom/Foreground";
-    else vertical = "Middle ground";
-
-    let horizontal = "";
-    if (x < 35) horizontal = "Left side";
-    else if (x > 65) horizontal = "Right side";
-    else horizontal = "Center";
-
-    return `${vertical} - ${horizontal} (approx ${x}%, ${y}%)`;
-};
-
-export const generateIdeaRender = async (sketch: FileData, assets: IdeaAsset[], onStatus?: (s:string)=>void): Promise<string> => {
+export const generateIdeaRender = async (
+    sketch: FileData, 
+    assets: IdeaAsset[], 
+    onStatus?: (s:string)=>void
+): Promise<string> => {
      if (!process.env.API_KEY) throw new Error("API Key missing");
      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
      
-     if (onStatus) onStatus("Đang phân tích và chuẩn bị dữ liệu hình ảnh...");
+     if (onStatus) onStatus("Đang phân tích Moodboard & Phác thảo...");
 
      // 1. Prepare parts for the multimodal request
-     // Part 0: The base sketch
-     const requestParts: any[] = [
-        { inlineData: { mimeType: sketch.mimeType, data: sketch.base64 } }
-     ];
-
-     // 2. Build the descriptive prompt mapping assets
-     let assetInstructions = "TASK: COMPOSITE RENDERING.\nBASE IMAGE: The first image provided is the 'Base Sketch'.\n\nOBJECT PLACEMENT INSTRUCTIONS:\n";
+     const requestParts: any[] = [];
      
-     assets.forEach((asset, index) => {
-         // Add asset image to request parts if available
-         if (asset.image) {
-             requestParts.push({ inlineData: { mimeType: asset.image.mimeType, data: asset.image.base64 } });
-             // The asset image index in the parts array is index + 1 (since sketch is 0)
-             assetInstructions += `\n[OBJECT ${index + 1}]: Use the image provided in Part #${index + 2} as a visual reference.\n`;
-         } else {
-             assetInstructions += `\n[OBJECT ${index + 1}]: No visual reference provided, generate based on label: "${asset.label}".\n`;
-         }
-
-         const location = getLocationDescription(asset.x, asset.y);
-         assetInstructions += `   - IDENTITY: ${asset.label}\n`;
-         assetInstructions += `   - LOCATION: Place this object at the ${location} of the scene.\n`;
-         assetInstructions += `   - INTEGRATION: Blend it realistically into the environment with correct lighting and perspective matching the Base Sketch.\n`;
-     });
-
-     const masterPrompt = `
-     ${assetInstructions}
-
-     FINAL RENDERING RULES:
-     1. PRESERVE STRUCTURE: Keep the architectural layout of the 'Base Sketch' exactly as is.
-     2. REALISM: Render the entire scene as a high-end luxury wedding photograph (8k, cinematic lighting).
-     3. MATERIALS: Use the visual references provided for the objects to match their texture and color exactly.
-     4. HARMONY: Ensure all placed objects cast correct shadows and reflect the environment lighting.
+     // 2. Build the descriptive prompt
+     let promptText = `
+     ROLE: Senior Architectural Visualizer.
+     TASK: Render a photorealistic frontal view based on a sketch and specific material references (Moodboard Pins).
+     
+     INPUTS MAPPING:
+     - IMAGE 1: The Base Sketch (Structure & Perspective).
      `;
 
-     requestParts.push({ text: masterPrompt });
+     // Add Sketch as Image 1
+     requestParts.push({ inlineData: { mimeType: sketch.mimeType, data: sketch.base64 } });
+
+     // 3. Loop through assets to add reference images and build instructions
+     assets.forEach((asset, index) => {
+         if (asset.image) {
+             const imageIndex = index + 2; // +2 because Sketch is Image 1
+             
+             // Add detailed instruction mapping to the prompt
+             promptText += `
+     - IMAGE ${imageIndex}: Reference Material/Object for position (${asset.x.toFixed(0)}%, ${asset.y.toFixed(0)}%) of the sketch.
+       INSTRUCTION: Apply the texture, material, or object style shown in IMAGE ${imageIndex} to the area around coordinates ${asset.x}%, ${asset.y}% on the sketch. Blend it naturally with correct perspective.
+             `;
+             
+             // Add the asset image data to the request parts
+             requestParts.push({ inlineData: { mimeType: asset.image.mimeType, data: asset.image.base64 } });
+         }
+     });
+
+     // 4. Add Global Rules
+     promptText += `
+     GLOBAL RULES:
+     - CAMERA: Frontal full shot, eye-level.
+     - COMPOSITION: Keep the layout exactly as drawn in IMAGE 1 (The Base Sketch).
+     - STYLE: Luxury, Photorealistic, High-end event decoration.
+     - LIGHTING: Soft studio lighting, creating depth and reflections on the floor.
+     - OUTPUT: A single cohesive image where all reference materials are blended into the sketch structure.
+     `;
+
+     // Add the text prompt as the first part of the request (or anywhere, but structure usually implies text + images)
+     // For @google/genai, we can construct the parts array with text and inlineData objects.
+     // We'll put the text instruction at the beginning of the context.
+     requestParts.unshift({ text: promptText });
 
      // 3. Render
      if (onStatus) onStatus("Đang thực hiện Render tổng hợp đa phương thức...");
